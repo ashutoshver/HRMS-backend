@@ -113,8 +113,10 @@ exports.getDashboardSummary = async (req, res) => {
   try {
     const totalEmployees = await Employee.countDocuments();
 
+    // Use IST (Asia/Kolkata) to determine "today" regardless of server timezone
     const now = new Date();
-    const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const istDate = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const today = new Date(Date.UTC(istDate.getFullYear(), istDate.getMonth(), istDate.getDate()));
     const tomorrow = new Date(today);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 
