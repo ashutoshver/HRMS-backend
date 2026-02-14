@@ -23,16 +23,22 @@ exports.markAttendance = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    const attendanceDate = new Date(date);
-    attendanceDate.setHours(0, 0, 0, 0);
+    // Normalize date to UTC midnight to avoid timezone mismatches
+    const parts = new Date(date);
+    const attendanceDate = new Date(Date.UTC(parts.getFullYear(), parts.getMonth(), parts.getDate()));
+
+    // Check for existing attendance using a date range (entire day in UTC)
+    const nextDay = new Date(attendanceDate);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
 
     const existing = await Attendance.findOne({
       employeeId,
-      date: attendanceDate,
+      date: { $gte: attendanceDate, $lt: nextDay },
     });
 
     if (existing) {
       return res.status(409).json({
+        success: false,
         message: "Attendance already marked for this employee on this date",
       });
     }
@@ -45,6 +51,13 @@ exports.markAttendance = async (req, res) => {
 
     res.status(201).json({ message: "Attendance marked successfully", attendance });
   } catch (error) {
+    // Handle MongoDB duplicate key error (race condition safety net)
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Attendance already marked for this employee on this date",
+      });
+    }
     if (error.kind === "ObjectId") {
       return res.status(400).json({ message: "Invalid employee ID format" });
     }
@@ -66,9 +79,11 @@ exports.getAttendanceByEmployee = async (req, res) => {
 
     // Optional date filter
     if (req.query.date) {
-      const filterDate = new Date(req.query.date);
-      filterDate.setHours(0, 0, 0, 0);
-      query.date = filterDate;
+      const parts = new Date(req.query.date);
+      const filterDate = new Date(Date.UTC(parts.getFullYear(), parts.getMonth(), parts.getDate()));
+      const nextDay = new Date(filterDate);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      query.date = { $gte: filterDate, $lt: nextDay };
     }
 
     const records = await Attendance.find(query)
@@ -98,16 +113,20 @@ exports.getDashboardSummary = async (req, res) => {
   try {
     const totalEmployees = await Employee.countDocuments();
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const tomorrow = new Date(today);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+
+    const dateFilter = { $gte: today, $lt: tomorrow };
 
     const presentToday = await Attendance.countDocuments({
-      date: today,
+      date: dateFilter,
       status: "Present",
     });
 
     const absentToday = await Attendance.countDocuments({
-      date: today,
+      date: dateFilter,
       status: "Absent",
     });
 
