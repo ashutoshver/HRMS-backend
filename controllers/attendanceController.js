@@ -108,6 +108,83 @@ exports.getAttendanceByEmployee = async (req, res) => {
   }
 };
 
+// Get attendance records with filters (date, employeeId, or both)
+exports.getAttendanceRecords = async (req, res) => {
+  try {
+    const { date, employeeId } = req.query;
+
+    if (!date && !employeeId) {
+      return res.status(400).json({
+        message: "Please provide at least one filter: date or employeeId",
+      });
+    }
+
+    let dateFilter = null;
+    if (date) {
+      const parts = new Date(date);
+      const filterDate = new Date(Date.UTC(parts.getFullYear(), parts.getMonth(), parts.getDate()));
+      const nextDay = new Date(filterDate);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      dateFilter = { $gte: filterDate, $lt: nextDay };
+    }
+
+    // If only employeeId filter
+    if (employeeId && !date) {
+      const employee = await Employee.findById(employeeId);
+      if (!employee) {
+        return res.status(404).json({ message: "Employee not found" });
+      }
+
+      const records = await Attendance.find({ employeeId })
+        .sort({ date: -1 })
+        .populate("employeeId", "employeeId fullName department");
+
+      return res.json({ records });
+    }
+
+    // If date filter is present (with or without employeeId)
+    let employees;
+    if (employeeId) {
+      const employee = await Employee.findById(employeeId);
+      if (!employee) {
+        return res.status(404).json({ message: "Employee not found" });
+      }
+      employees = [employee];
+    } else {
+      employees = await Employee.find().populate("department", "name");
+    }
+
+    const attendanceQuery = { date: dateFilter };
+    if (employeeId) {
+      attendanceQuery.employeeId = employeeId;
+    }
+
+    const attendanceRecords = await Attendance.find(attendanceQuery);
+
+    // Build a map of employeeId -> status for quick lookup
+    const attendanceMap = {};
+    for (const record of attendanceRecords) {
+      attendanceMap[record.employeeId.toString()] = record.status;
+    }
+
+    // Build response with all employees and their status
+    const records = employees.map((emp) => ({
+      _id: emp._id,
+      employeeId: emp.employeeId,
+      fullName: emp.fullName,
+      department: emp.department,
+      status: attendanceMap[emp._id.toString()] || "Not Marked",
+    }));
+
+    return res.json({ date: req.query.date, records });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(400).json({ message: "Invalid employee ID format" });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // Dashboard summary
 exports.getDashboardSummary = async (req, res) => {
   try {
